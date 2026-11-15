@@ -45,6 +45,7 @@ type Store struct {
 	nextTargetID   int
 	nextIncidentID int
 	epoch          int // bumped by Reset, so a check started before it cannot land after it
+	changes        uint64
 }
 
 // NewStore returns an empty store. now is the clock; pass nil for time.Now.
@@ -67,6 +68,7 @@ func (s *Store) Reset() {
 
 func (s *Store) resetLocked() {
 	s.epoch++
+	s.changes++
 	s.targets = map[int]*entry{}
 	s.order = nil
 	s.incidents = nil
@@ -91,6 +93,7 @@ func (s *Store) AddTarget(t Target) (Target, error) {
 		t.CertWarnDays = DefaultCertWarnDays
 	}
 	s.targets[t.ID] = &entry{target: t, state: Up, stateSince: t.CreatedAt}
+	s.changes++
 	s.order = append(s.order, t.ID)
 	return t, nil
 }
@@ -195,6 +198,7 @@ func (s *Store) recordLocked(id int, obs Observation) (State, *Transition, error
 		return "", nil, notFound(id)
 	}
 	obs.At = obs.At.UTC()
+	s.changes++
 
 	e.history = append(e.history, obs)
 	if len(e.history) > maxHistory {

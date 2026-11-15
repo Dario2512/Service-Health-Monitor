@@ -44,8 +44,29 @@ func run() error {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
+	// Shut down cleanly on Ctrl-C or on the signal Docker sends when stopping
+	// the container, so in-flight requests are allowed to finish.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	store := monitor.NewStore(nil)
+	persist := func() {}
+	// DATA_FILE keeps history, state and incidents across restarts. Without
+	// it a restart starts from nothing, uptime included.
+	if path := os.Getenv("DATA_FILE"); path != "" {
+		if err := store.Load(path); err != nil {
+			return fmt.Errorf("loading state: %w", err)
+		}
+		p := &monitor.Persister{Store: store, Path: path, Interval: 5 * time.Second, Log: log}
+		done := make(chan struct{})
+		go func() { p.Run(ctx); close(done) }()
+		defer func() { stop(); <-done }() // runs after svc.Stop, so the final save sees every check
+		persist = p.Flush
+		log.Info("state is persisted", "path", path, "targets", len(store.Targets()))
+	}
+
 	alerts := alert.NewDispatcher(alertChannels(log)...)
-	svc := monitor.NewService(monitor.NewStore(nil), &monitor.NetChecker{}, alerts)
+	svc := monitor.NewService(store, &monitor.NetChecker{}, alerts)
 	svc.Start()
 	defer svc.Stop()
 
@@ -83,6 +104,7 @@ func run() error {
 	mux.HandleFunc("POST /reset", func(w http.ResponseWriter, r *http.Request) {
 		svc.Reset()
 		alerts.Reset()
+		persist()
 		w.WriteHeader(http.StatusNoContent)
 	})
 
@@ -97,11 +119,6 @@ func run() error {
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
-
-	// Shut down cleanly on Ctrl-C or on the signal Docker sends when stopping
-	// the container, so in-flight requests are allowed to finish.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {
