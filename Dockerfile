@@ -39,7 +39,13 @@ LABEL org.opencontainers.image.title="Service Health Monitor" \
 
 # Run as an unprivileged user. A container process that does not need root
 # should not have it.
-RUN adduser -D -u 10001 app
+RUN adduser -D -u 10001 app && mkdir /data && chown app /data
+
+# State and the alert file live in /data. Mount a volume there
+# (-v monitor-data:/data) to keep history and incidents across containers;
+# without one they survive a restart of the container but not its removal.
+ENV DATA_FILE=/data/monitor.json \
+    ALERT_FILE=/data/alerts.jsonl
 
 COPY --from=build /app /usr/local/bin/app
 USER app
