@@ -44,6 +44,7 @@ type Store struct {
 	incidents      []*Incident
 	nextTargetID   int
 	nextIncidentID int
+	epoch          int // bumped by Reset, so a check started before it cannot land after it
 }
 
 // NewStore returns an empty store. now is the clock; pass nil for time.Now.
@@ -65,6 +66,7 @@ func (s *Store) Reset() {
 }
 
 func (s *Store) resetLocked() {
+	s.epoch++
 	s.targets = map[int]*entry{}
 	s.order = nil
 	s.incidents = nil
@@ -158,6 +160,25 @@ func (s *Store) statusLocked(e *entry, p Period) TargetStatus {
 	return st
 }
 
+// Epoch identifies the store's contents between resets.
+func (s *Store) Epoch() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.epoch
+}
+
+// RecordInEpoch is Record, refused if the store has been reset since epoch
+// was read. Target identifiers restart at 1 after a reset, so without this a
+// slow check of the old target 1 could be recorded against the new one.
+func (s *Store) RecordInEpoch(epoch, id int, obs Observation) (State, *Transition, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if epoch != s.epoch {
+		return "", nil, notFound(id)
+	}
+	return s.recordLocked(id, obs)
+}
+
 // Record applies one observation to a target and returns what the service
 // now believes. The policy is the whole of this function: the state changes
 // only when Threshold consecutive observations disagree with it, and a
@@ -165,6 +186,10 @@ func (s *Store) statusLocked(e *entry, p Period) TargetStatus {
 func (s *Store) Record(id int, obs Observation) (State, *Transition, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.recordLocked(id, obs)
+}
+
+func (s *Store) recordLocked(id int, obs Observation) (State, *Transition, error) {
 	e, ok := s.targets[id]
 	if !ok {
 		return "", nil, notFound(id)
