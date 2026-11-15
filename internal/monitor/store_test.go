@@ -165,6 +165,23 @@ func TestIncidentsNewestFirst(t *testing.T) {
 	}
 }
 
+func TestIncidentsTieBrokenByAscendingID(t *testing.T) {
+	s, c, a := newTestStore(t)
+	b, _ := s.AddTarget(Target{Name: "db", Type: TypeTCP, Address: "127.0.0.1:5432", IntervalSeconds: 10, TimeoutSeconds: 2})
+	for i := 0; i < Threshold; i++ {
+		at := c.tick(10 * time.Second)
+		for _, id := range []int{a.ID, b.ID} {
+			if _, _, err := s.Record(id, Observation{At: at, Observed: Down}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	incs := s.Incidents()
+	if len(incs) != 2 || incs[0].ID != 1 || incs[1].ID != 2 {
+		t.Fatalf("tied incidents order = %d, %d; want 1, 2", incs[0].ID, incs[1].ID)
+	}
+}
+
 func TestDuplicateNameConflictsAndResetRestartsIDs(t *testing.T) {
 	s, _, _ := newTestStore(t)
 	_, err := s.AddTarget(Target{Name: "API", Type: TypeTCP, Address: "x:1", IntervalSeconds: 1, TimeoutSeconds: 1})

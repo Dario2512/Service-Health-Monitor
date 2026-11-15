@@ -274,7 +274,7 @@ func (s *Store) Incidents() []Incident {
 		if !out[i].StartedAt.Equal(out[j].StartedAt) {
 			return out[i].StartedAt.After(out[j].StartedAt)
 		}
-		return out[i].ID > out[j].ID
+		return out[i].ID < out[j].ID // course convention: ties go by ascending id
 	})
 	return out
 }
