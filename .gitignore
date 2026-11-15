@@ -1,0 +1,8 @@
+.DS_Store
+coverage/
+*.out
+/app
+/bin/
+data/
+*.env
+.env

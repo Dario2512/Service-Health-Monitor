@@ -14,7 +14,7 @@ import (
 
 // Set by the linker via -ldflags in the Dockerfile; see the ARG lines there.
 var (
-	App     = "atad-project"
+	App     = "service-health-monitor"
 	Version = "0.0.0-dev"
 	Commit  = ""
 	BuiltAt = ""
