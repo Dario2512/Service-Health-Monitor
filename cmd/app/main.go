@@ -9,16 +9,19 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"atad-project/internal/alert"
+	"atad-project/internal/api"
+	"atad-project/internal/monitor"
 	"atad-project/internal/version"
 )
 
@@ -41,6 +44,11 @@ func run() error {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
+	alerts := alert.NewDispatcher(alertChannels(log)...)
+	svc := monitor.NewService(monitor.NewStore(nil), &monitor.NetChecker{}, alerts)
+	svc.Start()
+	defer svc.Stop()
+
 	mux := http.NewServeMux()
 
 	// ---- the common contract: four routes, identical in every project -------
@@ -51,7 +59,7 @@ func run() error {
 	})
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
+		api.WriteJSON(w, http.StatusOK, map[string]any{
 			"status":         "ok",
 			"uptime_seconds": int(time.Since(started).Seconds()),
 		})
@@ -73,11 +81,14 @@ func run() error {
 	// state without restarting the container. If your project persists data,
 	// this clears what was persisted too.
 	mux.HandleFunc("POST /reset", func(w http.ResponseWriter, r *http.Request) {
-		// TODO: clear your own state here.
+		svc.Reset()
+		alerts.Reset()
 		w.WriteHeader(http.StatusNoContent)
 	})
 
 	// ---- your own routes go below -------------------------------------------
+
+	(&api.API{Service: svc, Alerts: alerts}).Register(mux)
 
 	srv := &http.Server{
 		Addr:         ":8080",
@@ -111,16 +122,17 @@ func run() error {
 	}
 }
 
-// writeJSON is the one place that sets the content type, so every response in
-// the service is consistent about it.
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-// writeError produces the error shape the common contract requires. Use it for
-// every failure rather than writing the JSON by hand at each call site.
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]string{"error": code, "message": message})
+// alertChannels builds the alert channels from the environment. The log and
+// the file are always on, so every state change reaches at least two places;
+// ALERT_WEBHOOK_URL adds a third.
+func alertChannels(log *slog.Logger) []alert.Channel {
+	path := os.Getenv("ALERT_FILE")
+	if path == "" {
+		path = filepath.Join(os.TempDir(), "service-health-monitor-alerts.jsonl")
+	}
+	chans := []alert.Channel{alert.LogChannel{Log: log}, &alert.FileChannel{Path: path}}
+	if url := os.Getenv("ALERT_WEBHOOK_URL"); url != "" {
+		chans = append(chans, &alert.WebhookChannel{URL: url, Client: &http.Client{Timeout: 10 * time.Second}})
+	}
+	return chans
 }
