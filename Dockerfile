@@ -34,7 +34,7 @@ RUN CGO_ENABLED=0 go build \
 FROM alpine:3.21
 
 LABEL org.opencontainers.image.title="Service Health Monitor" \
-      org.opencontainers.image.authors="Friskan Dario <friskan.dario@student.upt.ro>" \
+      org.opencontainers.image.authors="Friskan Dario <dario.friskan@student.upt.ro>" \
       org.opencontainers.image.source="https://github.com/Dario2512/Service-Health-Monitor"
 
 # Run as an unprivileged user. A container process that does not need root
